@@ -1,0 +1,3 @@
+PyExifTool
+pandas
+matplotlib
