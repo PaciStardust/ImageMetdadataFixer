@@ -27,6 +27,7 @@ TAG_PIC_FOCAL = 'EXIF:FocalLength'
 TAG_PIC_FOCAL35 = 'EXIF:FocalLengthIn35mmFormat'
 TAG_PIC_DATE_TIME_ORIGINAL = 'EXIF:DateTimeOriginal'
 TAG_PIC_PHOTOGRAPHER = 'EXIF:Photographer'
+TAG_PIC_SOFTWARE = 'EXIF:Software'
 
 # UTILS
 
@@ -101,12 +102,13 @@ def range_graph_int(start: int, stop: int, interval: int) -> List[int]:
 PicDiff = Dict[str,tuple[str,str]]
 
 class CameraData:
-    def __init__(self, make: str, model: str, crop: float, shortcut: bool, lens_optional: bool):
+    def __init__(self, make: str, model: str, crop: float, shortcut: bool, lens_optional: bool, film: bool):
         self.make = make
         self.model = model
         self.has_shortcut = shortcut
         self.crop = crop
         self.lens_optional = lens_optional
+        self.film = film
 
     def is_valid(self) -> bool:
         return self.model != '' and self.crop > 0.0
@@ -275,7 +277,7 @@ def load_csv_data() -> CsvData:
         with open(PATH_CSV_CAM, 'r') as csv_d:
             reader = csv.reader(csv_d)
             for row in reader:
-                saved_cameras.append(CameraData(row[0], row[1], float(row[2]), row[3] == "1", row[4] == "1"))
+                saved_cameras.append(CameraData(row[0], row[1], float(row[2]), row[3] == "1", row[4] == "1", row[5] == "1"))
     
     saved_lenses: List[LensData] = []
     if os.path.exists(PATH_CSV_LENS):
@@ -303,7 +305,7 @@ def load_csv_data() -> CsvData:
 def write_csv_data(csv_data: CsvData):
     with open(PATH_CSV_CAM, 'w+') as csv_file:
         writer = csv.writer(csv_file)
-        writer.writerows([[x.make, x.model, str(x.crop), "1" if x.has_shortcut else "0", "1" if x.lens_optional else "0"] for x in csv_data.cameras])
+        writer.writerows([[x.make, x.model, str(x.crop), "1" if x.has_shortcut else "0", "1" if x.lens_optional else "0", "1" if x.film else "0"] for x in csv_data.cameras])
     
     with open(PATH_CSV_LENS, 'w+') as csv_file:
         writer = csv.writer(csv_file)
@@ -409,7 +411,7 @@ def convert_scanned_data(dataDict: dict) -> PictureData:
 
     cam_make = dataDict[TAG_CAM_MAKE] if TAG_CAM_MAKE in dataDict else ''
     cam_model = dataDict[TAG_CAM_MODEL] if TAG_CAM_MODEL in dataDict else ''
-    cam = CameraData(cam_make, cam_model, 1.0, False, False)
+    cam = CameraData(cam_make, cam_model, 1.0, False, False, False)
 
     lens_model = dataDict[TAG_LENS_MODEL] if TAG_LENS_MODEL in dataDict else ''
     lens_info_raw = dataDict[TAG_LENS_INFO] if TAG_LENS_INFO in dataDict else ''
@@ -502,8 +504,9 @@ def complete_camera_data(existing_data: CameraData) -> CameraData | None:
         return None
     shortcut = ask(f'Type "1" to add a shortcut for camera "{cam_name}"') == "1"
     lens_optional = ask(f'Type "1" to make lenses optional for camera "{cam_name}"') == "1"
+    film = ask(f'Type "1" to make camera "{cam_name}" use film') == "1"
 
-    new_cam = CameraData(existing_data.make, existing_data.model, crop, shortcut, lens_optional)
+    new_cam = CameraData(existing_data.make, existing_data.model, crop, shortcut, lens_optional, film)
     if not new_cam.is_valid():
         print(f'Camera "{cam_name}" has invalid values')
         return None
@@ -825,7 +828,7 @@ def bulk_edit(node_dirs: NodeDirs, csv_data: CsvData, exif: exiftool.ExifToolHel
         helper_camera_text = "Please select a camera:\n" + "\n".join(f' {i+1} > {x.name()}' for i,x in enumerate(csv_data.lookup_shortcut_camera))
         selected = int_or_zero(ask(helper_camera_text))
         if selected > 0 and selected <= len(csv_data.lookup_shortcut_camera):
-            changes = csv_data.lookup_shortcut_camera[selected - 1].equals(CameraData('', '', 0.0, False, False))
+            changes = csv_data.lookup_shortcut_camera[selected - 1].equals(CameraData('', '', 0.0, False, False, False))
         else:
             print('Invalid camera selected!')
             return
