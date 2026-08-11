@@ -12,6 +12,8 @@ PATH_CSV_CAM = 'cam.csv'
 PATH_CSV_INV_CAM = 'inv_cameras.csv'
 PATH_CSV_LENS = 'lens.csv'
 PATH_CSV_INV_LENS = 'inv_lens.csv'
+PATH_CSV_LOC = 'loc.csv'
+PATH_CSV_FILM = 'film.csv'
 
 FIGURE = 'fig.pdf'
 
@@ -184,11 +186,13 @@ class ScannedLensData:
         return self.model != '' and len(self.focal_min) != 0 and len(self.aperture_min) != 0
     
 class CsvData:
-    def __init__(self, cams: List[CameraData], lenses: List[LensData], inv_cams: List[str], inv_lenses: List[str]):
+    def __init__(self, cams: List[CameraData], lenses: List[LensData], inv_cams: List[str], inv_lenses: List[str], film: Dict[str,int], loc: List[str]):
         self.cameras = cams
         self.lenses = lenses
         self.invalid_cameras = inv_cams
         self.invalid_lenses = inv_lenses
+        self.film = film
+        self.loc = loc
         self.lookup_model_to_lens: Dict[str, LensData] = dict()
         self.lookup_name_to_camera: Dict[str, CameraData] = dict()
         self.lookup_shortcut_lens: List[LensData] = []
@@ -316,7 +320,21 @@ def load_csv_data() -> CsvData:
             for row in reader:
                 saved_inv_lenses.append(row[0])
 
-    return CsvData(saved_cameras, saved_lenses, saved_inv_cameras, saved_inv_lenses)
+    saved_film: Dict[str,int] = dict()
+    if os.path.exists(PATH_CSV_FILM):
+        with open(PATH_CSV_FILM, 'r') as csv_d:
+            reader = csv.reader(csv_d)
+            for row in reader:
+                saved_film[row[1]] = int_or_zero(row[1])
+
+    saved_loc: List[str] = []
+    if os.path.exists(PATH_CSV_LOC):
+        with open(PATH_CSV_LOC, 'r') as csv_d:
+            reader = csv.reader(csv_d)
+            for row in reader:
+                saved_loc.append(row[0])
+
+    return CsvData(saved_cameras, saved_lenses, saved_inv_cameras, saved_inv_lenses, saved_film, saved_loc)
 
 def write_csv_data(csv_data: CsvData):
     with open(PATH_CSV_CAM, 'w+') as csv_file:
@@ -334,6 +352,14 @@ def write_csv_data(csv_data: CsvData):
     with open(PATH_CSV_INV_LENS, 'w+') as csv_file:
         writer = csv.writer(csv_file)
         writer.writerows([[x] for x in csv_data.invalid_lenses])
+
+    with open(PATH_CSV_FILM, 'w+') as csv_file:
+            writer = csv.writer(csv_file)
+            writer.writerows([[x,y] for x,y in csv_data.film.items()])
+
+    with open(PATH_CSV_LOC, 'w+') as csv_file:
+            writer = csv.writer(csv_file)
+            writer.writerows([[x] for x in csv_data.loc])
 
 def scan_dir_recursive(directory_search: str, dir_files: Dict[str,List[str]]):
     files: List[str] = []
