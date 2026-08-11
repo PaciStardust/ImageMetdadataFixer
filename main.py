@@ -26,6 +26,7 @@ TAG_LENS_MODEL = 'EXIF:LensModel'
 TAG_PIC_FOCAL = 'EXIF:FocalLength'
 TAG_PIC_FOCAL35 = 'EXIF:FocalLengthIn35mmFormat'
 TAG_PIC_DATE_TIME_ORIGINAL = 'EXIF:DateTimeOriginal'
+TAG_PIC_PHOTOGRAPHER = 'EXIF:Photographer'
 
 # UTILS
 
@@ -814,6 +815,58 @@ def run_add_missing_data(csv_data: CsvData, exif: exiftool.ExifToolHelper):
     node_dirs = perform_scan_and_convert(dir, exif)
     add_missing_data(node_dirs, csv_data, exif)
 
+# BULK EDITS
+
+def bulk_edit(node_dirs: NodeDirs, csv_data: CsvData, exif: exiftool.ExifToolHelper):
+    mode = ask('What should be bulk edited? 1 - Camera / 2 - Lens / 3 - Photographer')
+    changes: PicDiff = dict()
+
+    if mode == '1':
+        helper_camera_text = "Please select a camera:\n" + "\n".join(f' {i+1} > {x.name()}' for i,x in enumerate(csv_data.lookup_shortcut_camera))
+        selected = int_or_zero(ask(helper_camera_text))
+        if selected > 0 and selected <= len(csv_data.lookup_shortcut_camera):
+            changes = csv_data.lookup_shortcut_camera[selected - 1].equals(CameraData('', '', 0.0, False, False))
+        else:
+            print('Invalid camera selected!')
+            return
+        
+    elif mode == '2':
+        helper_lens_text = "Please select a lens:\n" + "\n".join(f' {i+1} > {x.name()}' for i,x in enumerate(csv_data.lookup_shortcut_lens))
+        selected = int_or_zero(ask(helper_lens_text))
+        if selected > 0 and selected <= len(csv_data.lookup_shortcut_lens):
+            changes = csv_data.lookup_shortcut_lens[selected - 1].equals(LensData('', 0.0, 0.0, 0.0, 0.0, False))
+        else:
+            print('Invalid lens selected!')
+            return
+
+    elif mode == '3':
+        name = ask('Provide a photographer name')
+        changes[TAG_PIC_PHOTOGRAPHER] = (name, '')
+
+    if len(changes) == 0:
+        print('No valid values located, skipping')
+        return
+    
+    changes_transformed: Dict[str,str] = dict()
+    for (key, value) in changes.items():
+        changes_transformed[key] = value[0]
+
+    for (dir, node_groups) in node_dirs.items():
+        if ask(f'Type "1" to apply bulk edit to directory "{dir}"') == '1':
+            change_count = 0
+            for (_, node_pics) in node_groups.items():
+                for (_, node_pic) in node_pics.items():
+                    exif_set_tags(node_pic.path, changes_transformed, exif)
+                    change_count = change_count + 1
+            print(f'Applied changes to {change_count} files')
+
+def run_bulk_edit(csv_data: CsvData, exif: exiftool.ExifToolHelper):
+    dir = ask_directory("Which directory should be bulk edited?")
+    if dir == "":
+        return
+    node_dirs = perform_scan_and_convert(dir, exif)
+    bulk_edit(node_dirs, csv_data, exif)
+    
 # OTHER
 
 def run_full(csv_data: CsvData, exif: exiftool.ExifToolHelper):
@@ -827,6 +880,12 @@ def run_full(csv_data: CsvData, exif: exiftool.ExifToolHelper):
     fix_mismatched_groups(node_dirs, exif)
     node_dirs = perform_scan_and_convert(dir, exif)
     csv_data.reload_lookups()
+    while 1==1:
+        if ask('Press "1" to perform a bulk edit') == '1':
+            bulk_edit(node_dirs, csv_data, exif)
+            node_dirs = perform_scan_and_convert(dir, exif)
+        else:
+            break
     add_missing_data(node_dirs, csv_data, exif)
 
 # ANALYTICS
@@ -965,7 +1024,6 @@ def analyze_data(node_dirs: NodeDirs):
     main_data_frame = pd.DataFrame(data_dict)
     snapshot_frames: Dict[str, pd.DataFrame] = dict()
     curr_data_frame = main_data_frame.copy()
-    # todo: adding a second groupby, folder multiples
     while(True):
         opt = ask(f'Currently analyzing Dataset with {len(curr_data_frame)} rows and {len(snapshot_frames)} snapshots\n\n 1 - Filter / 2 - Top / 3 - Graph / 4 - Snapshot or Reset / 5 - Exit')
 
@@ -1116,7 +1174,7 @@ def main():
     csv_data = load_csv_data()
     with exiftool.ExifToolHelper() as exif:
         while True:
-            menuInput = ask('Welcome to ImageMetadataFixer!\n\n 1 > Scan for Cameras/Lenses\n 2 > Fix group mismatches \n 3 > Add missing data\n 4 > Full Process\n 5 > Analyze\n 6 > Exit')
+            menuInput = ask('Welcome to ImageMetadataFixer!\n\n 1 > Scan for Cameras/Lenses\n 2 > Fix group mismatches \n 3 > Add missing data\n 4 > Full Process\n 5 > Bulk Edit\n 6 > Analyze\n 7 > Exit')
 
             if (menuInput == '1'):
                 csv_data.reload_lookups()
@@ -1129,8 +1187,10 @@ def main():
             elif (menuInput == '4'):
                 run_full(csv_data, exif)
             elif (menuInput == '5'):
-                run_analze_data(exif)
+                run_bulk_edit(csv_data, exif)
             elif (menuInput == '6'):
+                run_analze_data(exif)
+            elif (menuInput == '7'):
                 print('Goodbye!')
                 break
             else:
