@@ -962,8 +962,7 @@ def add_missing_data(node_dirs: NodeDirs, csv_data: CsvData, exif: exiftool.Exif
                 if film_name != '' and film_scan != '':
                     film_text = get_film_text(film_name, film_scan)
                     changes[TAG_PIC_SOFTWARE] = film_text
-                    if pic_base.iso == 0:
-                        changes[TAG_PIC_ISO] = csv_data.film[film_name]
+                    changes[TAG_PIC_ISO] = csv_data.film[film_name]
                 else:
                     if pic_base.software_raw != '' and ask(f'{helper_picture_group_text} is shot from a film camera but has non-film software set, press "1" to remove') == "1":
                         changes[TAG_PIC_SOFTWARE] = ''
@@ -984,7 +983,7 @@ def run_add_missing_data(csv_data: CsvData, exif: exiftool.ExifToolHelper):
 # BULK EDITS
 
 def bulk_edit(node_dirs: NodeDirs, csv_data: CsvData, exif: exiftool.ExifToolHelper):
-    mode = ask('What should be bulk edited? 1 - Camera / 2 - Lens / 3 - Photographer')
+    mode = ask('What should be bulk edited? 1 - Camera / 2 - Lens / 3 - Photographer / 4 - Film')
     changes: PicDiff = dict()
 
     if mode == '1':
@@ -1008,6 +1007,27 @@ def bulk_edit(node_dirs: NodeDirs, csv_data: CsvData, exif: exiftool.ExifToolHel
     elif mode == '3':
         name = ask('Provide a photographer name')
         changes[TAG_PIC_PHOTOGRAPHER] = (name, '')
+
+    elif mode == '4':
+        helper_film_list: List[str] = [x for x in csv_data.film]
+        helper_film_text = "Please select a film:\n" + "\n".join(f' {i+1} > {x} (ISO {csv_data.film[x]})' for i,x in enumerate(helper_film_list))
+        helper_loc_text = "Please select a location:\n" + "\n".join(f' {i+1} > {x}' for i,x in enumerate(csv_data.loc))
+        selected = int_or_zero(ask(helper_film_text))
+        film_name: str
+        if selected > 0 and selected <= len(csv_data.film):
+            film_name = helper_film_list[selected - 1]
+        else:
+            print('Invalid film idex!')
+            return
+        selected = int_or_zero(ask(helper_loc_text))
+        film_scan: str
+        if selected > 0 and selected <= len(csv_data.loc):
+            film_scan = csv_data.loc[selected - 1]
+        else:
+            print('Invalid location idex!')
+            return
+        changes[TAG_PIC_ISO] = (csv_data.film[film_name], 0)
+        changes[TAG_PIC_SOFTWARE] = (get_film_text(film_name, film_scan), '')
 
     if len(changes) == 0:
         print('No valid values located, skipping')
