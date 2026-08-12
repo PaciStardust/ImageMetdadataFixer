@@ -33,7 +33,7 @@ TAG_PIC_SOFTWARE = 'EXIF:Software'
 
 # UTILS
 
-# todo: ask for missing film data, apply missing iso data, bulk film edit
+# todo: bulk film edit
 
 def float_compare(fl1: float, fl2: float) -> bool:
     return abs(fl2 - fl1) < 0.000001
@@ -100,6 +100,9 @@ def range_graph_int(start: int, stop: int, interval: int) -> List[int]:
         next += interval
         ret.append(next)
     return ret
+
+def get_film_text(film: str, loc: str) -> str:
+    return f'{film} @ {loc}'
 
 # DATA
 
@@ -820,6 +823,9 @@ def add_missing_data(node_dirs: NodeDirs, csv_data: CsvData, exif: exiftool.Exif
 
     helper_lens_text = "Please select a lens:\n" + "\n".join(f' {i+1} > {x.name()}' for i,x in enumerate(csv_data.lookup_shortcut_lens))
     helper_camera_text = "Please select a camera:\n" + "\n".join(f' {i+1} > {x.name()}' for i,x in enumerate(csv_data.lookup_shortcut_camera))
+    helper_film_list: List[str] = [x for x in csv_data.film]
+    helper_film_text = "Please select a film:\n" + "\n".join(f' {i+1} > {x} (ISO {csv_data.film[x]})' for i,x in enumerate(helper_film_list))
+    helper_loc_text = "Please select a location:\n" + "\n".join(f' {i+1} > {x}' for i,x in enumerate(csv_data.loc))
 
     for (key_dir, node_groups) in node_dirs.items():
         if ask(f'Press "1" to skip directory "{key_dir}"') == "1":
@@ -925,6 +931,42 @@ def add_missing_data(node_dirs: NodeDirs, csv_data: CsvData, exif: exiftool.Exif
                 and can_fix_check(do_fixes, do_fixes_no_shortcut, do_fixes_shorctut_auto, pic_base.camera.has_shortcut, f'Applying 35mm focal length ({pic_base.focal_length * pic_base.camera.crop})')):
                 pic_base.focal_length_in_35mm_format = int(pic_base.focal_length * pic_base.camera.crop)
                 changes[TAG_PIC_FOCAL35] = str(pic_base.focal_length_in_35mm_format)
+
+            if camera_set and pic_base.camera.film:
+                (_, film_name, film_scan) = get_film_data(pic_base.software_raw, True)
+                if film_name == '' or film_name not in csv_data.film:
+                    option = ask(f'{helper_picture_group_text} is shot from a film camera but does not have a film set: 1 - Skip / 2 - Open + Assign / Other - Set')
+                    if option != "1":
+                        if option == "2":
+                            open_file(pic_base.path)
+                        selected = int_or_zero(ask(helper_film_text))
+                        if selected > 0 and selected <= len(csv_data.film):
+                            film_name = helper_film_list[selected - 1]
+                        else:
+                            film_name = ''
+                            print('Invalid film idex!')
+
+                if film_name != '':
+                    if film_scan == '' or film_scan not in csv_data.loc:
+                        option = ask(f'{helper_picture_group_text} has film set but no scan location: 1 - Skip / 2 - Open + Assign / Other - Set')
+                        if option != "1":
+                            if option == "2":
+                                open_file(pic_base.path)
+                            selected = int_or_zero(ask(helper_loc_text))
+                            if selected > 0 and selected <= len(csv_data.loc):
+                                film_scan = csv_data.loc[selected - 1]
+                            else:
+                                film_scan = ''
+                                print('Invalid location idex!')
+
+                if film_name != '' and film_scan != '':
+                    film_text = get_film_text(film_name, film_scan)
+                    changes[TAG_PIC_SOFTWARE] = film_text
+                    if pic_base.iso == 0:
+                        changes[TAG_PIC_ISO] = csv_data.film[film_name]
+                else:
+                    if pic_base.software_raw != '' and ask(f'{helper_picture_group_text} is shot from a film camera but has non-film software set, press "1" to remove') == "1":
+                        changes[TAG_PIC_SOFTWARE] = ''
 
             if len(changes) > 0:
                 for (_, pic) in node_pics.items():
@@ -1317,7 +1359,7 @@ def main():
     csv_data = load_csv_data()
     with exiftool.ExifToolHelper() as exif:
         while True:
-            menuInput = ask('Welcome to ImageMetadataFixer!\n\n 1 > Scan for Cameras/Lenses\n 2 > Fix group mismatches \n 3 > Add missing data\n 4 > Bulk Edit\n 5 > Scan for Film\n 6 > Full Process\n 7 > Analyze\n 8 > Exit')
+            menuInput = ask('Welcome to ImageMetadataFixer!\n\n 1 > Scan for Cameras/Lenses\n 2 > Fix group mismatches\n 3 > Bulk Edit\n 4 > Scan for Film\n 5 > Add missing data\n 6 > Full Process\n 7 > Analyze\n 8 > Exit')
 
             if (menuInput == '1'):
                 csv_data.reload_lookups()
@@ -1325,13 +1367,13 @@ def main():
             elif (menuInput == '2'):
                 run_fix_mismatched_groups(exif)
             elif (menuInput == '3'):
-                csv_data.reload_lookups()
-                run_add_missing_data(csv_data, exif)
-            elif (menuInput == '4'):
                 run_bulk_edit(csv_data, exif)
-            elif (menuInput == '5'):
+            elif (menuInput == '4'):
                 csv_data.reload_lookups()
                 run_scan_for_film(csv_data, exif)
+            elif (menuInput == '5'):
+                csv_data.reload_lookups()
+                run_add_missing_data(csv_data, exif)
             elif (menuInput == '6'):
                 run_full(csv_data, exif)
             elif (menuInput == '7'):
