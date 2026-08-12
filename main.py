@@ -1,5 +1,5 @@
 import exiftool
-from typing import List, Dict
+from typing import List, Dict, Set
 import csv
 import os
 import sys
@@ -32,6 +32,8 @@ TAG_PIC_PHOTOGRAPHER = 'EXIF:Photographer'
 TAG_PIC_SOFTWARE = 'EXIF:Software'
 
 # UTILS
+
+# todo: ask for missing film data, apply missing iso data, bulk film edit
 
 def float_compare(fl1: float, fl2: float) -> bool:
     return abs(fl2 - fl1) < 0.000001
@@ -216,7 +218,6 @@ class CsvData:
             if camera.has_shortcut:
                 self.lookup_shortcut_camera.append(camera)
 
-regex_picture_film_info_extractor = re.compile(r'^([^ @]+(?: +[^ @]+)*) @ (.+)$')
 class PictureData:
     def __init__(self, path: str, focal_length: float, focal_length_in_35mm_format: int, iso: int, exposure_time: float, aperture: float, created: datetime.datetime, photographer: str, software: str, cam: CameraData, lens: LensData):
         self.path = path
@@ -229,16 +230,7 @@ class PictureData:
         self.lens = lens
         self.created = created
         self.photographer = photographer
-        self.film_name = ''
-        self.film_scanner = ''
         self.software_raw = software
-        self.software = software
-        if cam.film:
-            result = regex_picture_film_info_extractor.search(software)
-            if result != None:
-                self.software = ''
-                self.film_name = result.group(1)
-                self.film_scanner = result.group(2)
 
     def name(self) -> str:
         txt_focal = '?' if self.focal_length == 0 else self.focal_length
@@ -289,6 +281,14 @@ def get_preferred_picture_data(node_pics: NodePics) -> PictureData:
             return node_pics[k]
     return next(iter(node_pics.values()))
 
+regex_film_info_extractor = re.compile(r'^([^ @]+(?: +[^ @]+)*) @ (.+)$')
+def get_film_data(raw_software: str, is_film: bool) -> tuple[str,str,str]:
+    if is_film:
+        result = regex_film_info_extractor.search(raw_software)
+        if result != None:
+            return ('', result.group(1), result.group(2))
+    return (raw_software, '', '')
+
 # LOADING / WRITING DATA
 
 def load_csv_data() -> CsvData:
@@ -325,7 +325,7 @@ def load_csv_data() -> CsvData:
         with open(PATH_CSV_FILM, 'r') as csv_d:
             reader = csv.reader(csv_d)
             for row in reader:
-                saved_film[row[1]] = int_or_zero(row[1])
+                saved_film[row[0]] = int_or_zero(row[1])
 
     saved_loc: List[str] = []
     if os.path.exists(PATH_CSV_LOC):
@@ -522,6 +522,7 @@ def collect_gear_data(node_dirs: NodeDirs) -> tuple[List[ScannedLensData], List[
                     cam_name = pic.camera.name()
                     if cam_name not in found_cams:
                         found_cams[cam_name] = pic.camera
+
     return_lenses: List[ScannedLensData] = [found_lenses[x] for x in found_lenses.keys()]
     return_cams: List[CameraData] = [found_cams[x] for x in found_cams.keys()]
     return (return_lenses, return_cams)
@@ -652,6 +653,80 @@ def run_scan_for_gear(csv_data: CsvData, exif: exiftool.ExifToolHelper):
         return
     node_dirs = perform_scan_and_convert(dir, exif)
     scan_for_gear(node_dirs, csv_data)
+
+def collect_film_data(node_dirs: NodeDirs, csv_data: CsvData) -> tuple[Dict[str,List[int]], List[str]]:
+    found_film: Dict[str,Set[int]] = dict()
+    found_locations: Set[str] = set()
+    for (_, node_groups) in node_dirs.items():
+        for (_, node_pics) in node_groups.items():
+            for (_, pic) in node_pics.items():
+                cam_name = pic.camera.name()
+                if cam_name not in csv_data.lookup_name_to_camera:
+                    continue
+                ref_cam = csv_data.lookup_name_to_camera[cam_name]
+                if not ref_cam.film:
+                    continue
+
+                film_data = get_film_data(pic.software_raw, True)
+                if film_data[2] != '':
+                    found_locations.add(film_data[2])
+                if film_data[1] != '':
+                    if film_data[1] not in found_film:
+                        found_film[film_data[1]] = set()
+                    found_film[film_data[1]].add(pic.iso)
+
+    return_film: Dict[str,List[str]] = dict()
+    for (film, isos) in found_film.items():
+        return_film[film] = [x for x in isos]
+    return_locations: List[str] = [x for x in found_locations]
+    return (return_film, return_locations)
+
+def scan_for_film(node_dirs: NodeDirs, csv_data: CsvData):
+    (col_film, col_locations) = collect_film_data(node_dirs, csv_data)
+    show_mismatches = ask(f'Collected {len(col_film)} films and {len(col_locations)} locations\nType "1" to also show mismatches') == '1'
+
+    for (film, iso) in col_film.items():
+        if film in csv_data.film:
+            if not show_mismatches:
+                print(f'Skipping film "{film}" as a match is in list')
+                continue
+            else:
+                match_film_iso = csv_data.film[film]
+                if len(iso) == 1 and match_film_iso == iso[0]:
+                    print(f'Skipping film "{film}" as no mismatch is found')
+
+        option = ask(f'Film {film}: 1 - Skip / Other - Add to list')
+        if option == '1':
+            continue
+
+        if len(iso) > 0:
+            print(f'Film "{film}" has the following values for ISO: {iso}')
+            selected = int_or_zero(ask('Which index would you like to pick (starting at 1, invalid = none)'))
+            if selected > 0 and selected <= len(iso):
+                csv_data.film[film] = iso[selected - 1]
+                continue
+
+        new_iso = int_or_zero(ask(f'Film "{film}" does not have a value for ISO, please provide one'))
+        csv_data.film[film] = new_iso
+
+    for location in col_locations:
+        if location in csv_data.loc:
+            continue
+        option = ask(f'Location {location}: 1 - Skip / Other - Add to list')
+        if option == '1':
+            continue
+        csv_data.loc.append(location)
+
+    write_csv_data(csv_data)
+
+def run_scan_for_film(csv_data: CsvData, exif: exiftool.ExifToolHelper):
+    if ask('This tool will only work correctly once camera data has been fixed. Press "1" to cancel') == "1":
+        return
+    dir = ask_directory('Which directory should be scanned?')
+    if dir == "":
+        return
+    node_dirs = perform_scan_and_convert(dir, exif)
+    scan_for_film(node_dirs, csv_data)
 
 # DATA FIXING
 
@@ -926,6 +1001,7 @@ def run_full(csv_data: CsvData, exif: exiftool.ExifToolHelper):
     node_dirs = perform_scan_and_convert(dir, exif)
     csv_data.reload_lookups()
     scan_for_gear(node_dirs, csv_data)
+    csv_data.reload_lookups()
     fix_mismatched_groups(node_dirs, exif)
     node_dirs = perform_scan_and_convert(dir, exif)
     csv_data.reload_lookups()
@@ -936,6 +1012,10 @@ def run_full(csv_data: CsvData, exif: exiftool.ExifToolHelper):
         else:
             break
     add_missing_data(node_dirs, csv_data, exif)
+    if ask('Press "1" to perform a film pass') == '1':
+        node_dirs = perform_scan_and_convert(dir, exif)
+        scan_for_film(node_dirs, csv_data)
+        add_missing_data(node_dirs, csv_data, exif)
 
 # ANALYTICS
 
@@ -1049,11 +1129,14 @@ def get_filtered_by_column(curr_data_frame: pd.DataFrame) -> pd.DataFrame | None
         print('Unable to designate column to a type')
         return None
 
-def analyze_data(node_dirs: NodeDirs):
+def analyze_data(node_dirs: NodeDirs, csv_data: CsvData):
     data_dict = []
     for (key_dict, node_groups) in node_dirs.items():
         for (_, node_pics) in node_groups.items():
             pic = get_preferred_picture_data(node_pics)
+            cam_name = pic.camera.name()
+            ref_cam = csv_data.lookup_name_to_camera[cam_name] if cam_name in csv_data.lookup_name_to_camera else pic.camera
+            film_data = get_film_data(pic.software_raw, ref_cam.film)
             data_dict.append({
                 COL_FILE_PATH: pic.path,
                 COL_FILE_FOLDER: key_dict,
@@ -1075,9 +1158,10 @@ def analyze_data(node_dirs: NodeDirs):
                 COL_PIC_CREAT: pic.created,
                 COL_PIC_PHOTO: pic.photographer,
                 COL_PIC_SOFT_RAW: pic.software_raw,
-                COL_PIC_SOFT: pic.software,
-                COL_PIC_FILM_NAME: pic.film_name,
-                COL_PIC_FILM_SCAN: pic.film_scanner
+
+                COL_PIC_SOFT: film_data[0],
+                COL_PIC_FILM_NAME: film_data[1],
+                COL_PIC_FILM_SCAN: film_data[2]
             })
 
     main_data_frame = pd.DataFrame(data_dict)
@@ -1218,14 +1302,14 @@ def analyze_data(node_dirs: NodeDirs):
         else:
             print('Invalid option!')
 
-def run_analze_data(exif: exiftool.ExifToolHelper):
+def run_analze_data(exif: exiftool.ExifToolHelper, csv_data: CsvData):
     if ask('This tool will analyze only one of the files within a group, please fix any mismatches before running this. Press "1" to cancel') == "1":
         return
     dir = ask_directory("Which directory should be analyzed?")
     if dir == "":
         return
     node_dirs = perform_scan_and_convert(dir, exif)
-    analyze_data(node_dirs)
+    analyze_data(node_dirs, csv_data)
     
 # LOGIC BEGINS
 
@@ -1233,7 +1317,7 @@ def main():
     csv_data = load_csv_data()
     with exiftool.ExifToolHelper() as exif:
         while True:
-            menuInput = ask('Welcome to ImageMetadataFixer!\n\n 1 > Scan for Cameras/Lenses\n 2 > Fix group mismatches \n 3 > Add missing data\n 4 > Full Process\n 5 > Bulk Edit\n 6 > Analyze\n 7 > Exit')
+            menuInput = ask('Welcome to ImageMetadataFixer!\n\n 1 > Scan for Cameras/Lenses\n 2 > Fix group mismatches \n 3 > Add missing data\n 4 > Bulk Edit\n 5 > Scan for Film\n 6 > Full Process\n 7 > Analyze\n 8 > Exit')
 
             if (menuInput == '1'):
                 csv_data.reload_lookups()
@@ -1244,12 +1328,15 @@ def main():
                 csv_data.reload_lookups()
                 run_add_missing_data(csv_data, exif)
             elif (menuInput == '4'):
-                run_full(csv_data, exif)
-            elif (menuInput == '5'):
                 run_bulk_edit(csv_data, exif)
+            elif (menuInput == '5'):
+                csv_data.reload_lookups()
+                run_scan_for_film(csv_data, exif)
             elif (menuInput == '6'):
-                run_analze_data(exif)
+                run_full(csv_data, exif)
             elif (menuInput == '7'):
+                run_analze_data(exif, csv_data)
+            elif (menuInput == '8'):
                 print('Goodbye!')
                 break
             else:
