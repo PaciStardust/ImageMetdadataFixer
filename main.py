@@ -9,7 +9,7 @@ import datetime
 import pandas as pd
 
 PATH_CSV_CAM = 'cam.csv'
-PATH_CSV_INV_CAM = 'inv_cameras.csv'
+PATH_CSV_INV_CAM = 'inv_cam.csv'
 PATH_CSV_LENS = 'lens.csv'
 PATH_CSV_INV_LENS = 'inv_lens.csv'
 PATH_CSV_LOC = 'loc.csv'
