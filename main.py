@@ -30,6 +30,7 @@ TAG_PIC_FOCAL35 = 'EXIF:FocalLengthIn35mmFormat'
 TAG_PIC_DATE_TIME_ORIGINAL = 'EXIF:DateTimeOriginal'
 TAG_PIC_PHOTOGRAPHER = 'EXIF:Photographer'
 TAG_PIC_SOFTWARE = 'EXIF:Software'
+TAG_PIC_SEQUENCE = 'MakerNotes:SequenceImageNumber'
 
 # UTILS
 
@@ -222,7 +223,7 @@ class CsvData:
                 self.lookup_shortcut_camera.append(camera)
 
 class PictureData:
-    def __init__(self, path: str, focal_length: float, focal_length_in_35mm_format: int, iso: int, exposure_time: float, aperture: float, created: datetime.datetime, photographer: str, software: str, cam: CameraData, lens: LensData):
+    def __init__(self, path: str, focal_length: float, focal_length_in_35mm_format: int, iso: int, exposure_time: float, aperture: float, created: datetime.datetime, photographer: str, software: str, sequence: int, cam: CameraData, lens: LensData):
         self.path = path
         self.focal_length = focal_length
         self.focal_length_in_35mm_format = focal_length_in_35mm_format
@@ -234,6 +235,7 @@ class PictureData:
         self.created = created
         self.photographer = photographer
         self.software_raw = software
+        self.sequence = sequence
 
     def name(self) -> str:
         txt_focal = '?' if self.focal_length == 0 else self.focal_length
@@ -402,7 +404,8 @@ def perform_scan(directory: str, exif: exiftool.ExifToolHelper) -> Dict[str,List
         TAG_PIC_FOCAL35,
         TAG_PIC_DATE_TIME_ORIGINAL,
         TAG_PIC_PHOTOGRAPHER,
-        TAG_PIC_SOFTWARE
+        TAG_PIC_SOFTWARE,
+        TAG_PIC_SEQUENCE
     ]
 
     for (i_dir,(dir,files)) in enumerate(dir_files.items()):
@@ -477,8 +480,9 @@ def convert_scanned_data(dataDict: dict) -> PictureData:
     pic_date = datetime_or_min(dataDict[TAG_PIC_DATE_TIME_ORIGINAL] if TAG_PIC_DATE_TIME_ORIGINAL in dataDict else '')
     pic_photographer = dataDict[TAG_PIC_PHOTOGRAPHER] if TAG_PIC_PHOTOGRAPHER in dataDict else ''
     pic_software = dataDict[TAG_PIC_SOFTWARE] if TAG_PIC_SOFTWARE in dataDict else ''
+    pic_sequence = dataDict[TAG_PIC_SEQUENCE] if TAG_PIC_SEQUENCE in dataDict else 0
 
-    return PictureData(path, pic_focal, pic_focal35, pic_iso, pic_exposure, pic_aperture, pic_date, pic_photographer, pic_software, cam, lens)
+    return PictureData(path, pic_focal, pic_focal35, pic_iso, pic_exposure, pic_aperture, pic_date, pic_photographer, pic_software, pic_sequence, cam, lens)
 
 regex_pixel_file_extractor = re.compile(r'^PXL_[0-9]+_[0-9]+')
 def fix_naming_system_irregularities(pic: PictureData, name: str) -> str:
@@ -1104,10 +1108,11 @@ COL_PIC_SOFT_RAW = 'Pic_Soft_Raw'
 COL_PIC_SOFT = 'Pic_Soft'
 COL_PIC_FILM_NAME = 'Pic_Film_Name'
 COL_PIC_FILM_SCAN = 'Pic_Film_Scan'
+COL_PIC_SEQ = 'Pic_Seq'
 
 COLS_STR: List[str] = [COL_FILE_FOLDER, COL_CAM_MAKE, COL_CAM_MODEL, COL_LENS_MODEL, COL_PIC_PHOTO, COL_PIC_SOFT_RAW, COL_PIC_SOFT, COL_PIC_FILM_NAME, COL_PIC_FILM_SCAN]
 COLS_FLOAT: List[str] = [COL_LENS_FOCAL_MIN, COL_LENS_FOCAL_MAX, COL_LENS_APER_MIN, COL_LENS_APER_MAX, COL_PIC_FOCAL, COL_PIC_EXPO, COL_PIC_APER]
-COLS_INT: List[str] = [COL_PIC_FOCAL35, COL_PIC_ISO]
+COLS_INT: List[str] = [COL_PIC_FOCAL35, COL_PIC_ISO, COL_PIC_SEQ]
 COLS_DATE: List[str] = [COL_PIC_CREAT]
 
 def ask_for_column(action: str, exclude_str: bool = False) -> str | None:
@@ -1220,6 +1225,7 @@ def analyze_data(node_dirs: NodeDirs, csv_data: CsvData):
                 COL_PIC_CREAT: pic.created,
                 COL_PIC_PHOTO: pic.photographer,
                 COL_PIC_SOFT_RAW: pic.software_raw,
+                COL_PIC_SEQ: pic.sequence,
 
                 COL_PIC_SOFT: film_data[0],
                 COL_PIC_FILM_NAME: film_data[1],
@@ -1281,6 +1287,7 @@ def analyze_data(node_dirs: NodeDirs, csv_data: CsvData):
                         label.set_fontsize(4)
                         label.set_rotation('vertical')
                 plot.get_figure().savefig(FIGURE)
+                plot.clear()
                 open_file(FIGURE)
 
             elif graph == "2":
